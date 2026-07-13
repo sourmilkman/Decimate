@@ -7,7 +7,7 @@ import type { DestructibleConfig, GameState, RoundResult } from './types';
 
 interface RuntimeObject { config:DestructibleConfig; mesh:THREE.Mesh; body:RAPIER.RigidBody; damage:number; broken:boolean; }
 interface Projectile { mesh:THREE.Mesh; body:RAPIER.RigidBody; born:number; hits:Set<string>; }
-interface Fragment { mesh:THREE.Mesh; body:RAPIER.RigidBody; born:number; }
+interface VaporParticle { mesh:THREE.Mesh; velocity:THREE.Vector3; born:number; life:number; }
 export interface GameEvents {
   stats:(time:number, score:number, percent:number)=>void;
   state:(state:GameState)=>void;
@@ -22,7 +22,7 @@ export class DecimateGame {
   private world!:RAPIER.World;
   private objects:RuntimeObject[] = [];
   private projectiles:Projectile[] = [];
-  private fragments:Fragment[] = [];
+  private particles:VaporParticle[] = [];
   private catapult = new THREE.Group();
   private alien = new THREE.Group();
   private trajectory:THREE.Line;
@@ -108,12 +108,15 @@ export class DecimateGame {
     const arm=new THREE.Mesh(new THREE.BoxGeometry(.24,.24,2.6),wood); arm.rotation.x=-.58; arm.position.set(0,1.05,-.15); this.catapult.add(arm);
     const cup=new THREE.Mesh(new THREE.SphereGeometry(.38,16,8,0,Math.PI*2,0,Math.PI/2),new THREE.MeshStandardMaterial({color:0x222532,side:THREE.DoubleSide})); cup.position.set(0,1.85,.9); this.catapult.add(cup);
     this.catapult.position.set(0,0,4.4); this.scene.add(this.catapult);
-    const body=new THREE.Mesh(new THREE.SphereGeometry(.46,24,16),new THREE.MeshStandardMaterial({color:0xb7ff42,roughness:.55})); body.scale.y=1.25; body.position.y=.78; this.alien.add(body);
-    [-.17,.17].forEach(x=>{const eye=new THREE.Mesh(new THREE.SphereGeometry(.085,12,8),new THREE.MeshBasicMaterial({color:0x101218})); eye.position.set(x,.9,.42); this.alien.add(eye);});
-    this.alien.position.set(-1.15,0,4.35); this.scene.add(this.alien);
+    this.resetAlienAppearance();this.alien.position.set(-1.15,0,4.35);this.scene.add(this.alien);
+  }
+  private resetAlienAppearance() {
+    this.alien.clear();
+    const body=new THREE.Mesh(new THREE.SphereGeometry(.46,24,16),new THREE.MeshStandardMaterial({color:0xb7ff42,roughness:.55}));body.scale.y=1.25;body.position.y=.78;this.alien.add(body);
+    [-.17,.17].forEach(x=>{const eye=new THREE.Mesh(new THREE.SphereGeometry(.085,12,8),new THREE.MeshBasicMaterial({color:0x101218}));eye.position.set(x,.9,.42);this.alien.add(eye);});
   }
   private resetObjects() {
-    this.objects.forEach(o=>{this.scene.remove(o.mesh);this.world.removeRigidBody(o.body)}); this.objects=[];
+    this.objects.forEach(o=>{this.scene.remove(o.mesh);if(!o.broken)this.world.removeRigidBody(o.body)});this.objects=[];
     livingRoom.objects.forEach(config=>{
       const geometry=config.shape==='sphere'?new THREE.SphereGeometry(config.size[0]/2,16,12):new THREE.BoxGeometry(...config.size);
       const material=new THREE.MeshStandardMaterial({color:config.color,roughness:.62,metalness:config.id==='tv'?.35:0});
@@ -125,8 +128,9 @@ export class DecimateGame {
     });
   }
   private resetRound() {
-    [...this.projectiles,...this.fragments].forEach(x=>{this.scene.remove(x.mesh);this.world.removeRigidBody(x.body)}); this.projectiles=[];this.fragments=[];
-    this.resetObjects(); this.remaining=livingRoom.duration;this.score=0;this.awarded=0;this.awardedIds.clear();this.disguised=false;this.disguiseMode=false;this.catapult.visible=true;this.alien.visible=true;this.lastWarningSecond=-1;
+    this.projectiles.forEach(x=>{this.scene.remove(x.mesh);this.world.removeRigidBody(x.body)});this.projectiles=[];
+    this.particles.forEach(x=>{this.scene.remove(x.mesh);x.mesh.geometry.dispose();(x.mesh.material as THREE.Material).dispose()});this.particles=[];
+    this.resetObjects();this.resetAlienAppearance();this.remaining=livingRoom.duration;this.score=0;this.awarded=0;this.awardedIds.clear();this.disguised=false;this.disguiseMode=false;this.catapult.visible=true;this.alien.visible=true;this.lastWarningSecond=-1;
     this.events.stats(this.remaining,0,0); this.events.toast('Drag back, aim, release.');
   }
   private bindInput() {
@@ -163,24 +167,23 @@ export class DecimateGame {
   private clearHighlights(){this.objects.forEach(o=>(o.mesh.material as THREE.MeshStandardMaterial).emissive.set(0x000000));}
   private damageObject(object:RuntimeObject, speed:number, point:THREE.Vector3) {
     if(object.broken)return;object.damage+=Math.max(5,speed*.72);object.body.applyImpulse({x:(Math.random()-.5)*3,y:2,z:-2},true);
-    if(object.damage<object.config.breakThreshold){this.audio.impact();return;}
+    if(object.damage<object.config.breakThreshold){this.audio.impact();const material=object.mesh.material as THREE.MeshStandardMaterial;material.emissive.set(0x6e8124);setTimeout(()=>{if(!object.broken)material.emissive.set(0x000000)},100);return;}
     object.broken=true;const points=awardOnce(this.awardedIds,object.config.id,object.config.points);this.score+=points;this.awarded+=points;this.audio.impact();this.shake=.22;
-    object.mesh.visible=false;this.world.removeRigidBody(object.body);this.spawnFragments(object,point);
+    object.mesh.visible=false;this.world.removeRigidBody(object.body);this.spawnVapor(object,point);this.audio.vaporize();
     const percent=decimationPercent(this.awarded,this.total);this.events.stats(this.remaining,this.score,percent);this.events.toast(`+${object.config.points} · ${object.config.name}`);
   }
-  private spawnFragments(object:RuntimeObject, point:THREE.Vector3) {
-    const s=object.config.size; const material=(object.mesh.material as THREE.MeshStandardMaterial).clone();
-    for(let i=0;i<4;i++){
-      const size=[Math.max(.18,s[0]*.32),Math.max(.18,s[1]*.32),Math.max(.18,s[2]*.32)] as const;
-      const mesh=new THREE.Mesh(new THREE.BoxGeometry(...size),material);mesh.castShadow=true;mesh.position.copy(point).add(new THREE.Vector3((i%2-.5)*.45,.15+Math.floor(i/2)*.35,(Math.random()-.5)*.4));this.scene.add(mesh);
-      const body=this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(mesh.position.x,mesh.position.y,mesh.position.z));this.world.createCollider(RAPIER.ColliderDesc.cuboid(size[0]/2,size[1]/2,size[2]/2).setDensity(.35),body);body.applyImpulse({x:(Math.random()-.5)*6,y:3+Math.random()*4,z:(Math.random()-.5)*6},true);this.fragments.push({mesh,body,born:performance.now()});
+  private spawnVapor(object:RuntimeObject, point:THREE.Vector3) {
+    const origin=object.mesh.position.clone().lerp(point,.25),color=(object.mesh.material as THREE.MeshStandardMaterial).color;
+    for(let i=0;i<22;i++){
+      const radius=.035+Math.random()*.085,material=new THREE.MeshStandardMaterial({color,emissive:color,emissiveIntensity:1.8,transparent:true,opacity:1,depthWrite:false});
+      const mesh=new THREE.Mesh(new THREE.IcosahedronGeometry(radius,0),material);mesh.position.copy(origin).add(new THREE.Vector3((Math.random()-.5)*.35,(Math.random()-.5)*.35,(Math.random()-.5)*.35));this.scene.add(mesh);
+      const velocity=new THREE.Vector3((Math.random()-.5)*3.8,.8+Math.random()*3.2,(Math.random()-.5)*3.8);this.particles.push({mesh,velocity,born:performance.now(),life:550+Math.random()*500});
     }
-    while(this.fragments.length>64){const old=this.fragments.shift()!;this.scene.remove(old.mesh);this.world.removeRigidBody(old.body);}
   }
   private updatePhysics(now:number) {
     this.world.timestep=1/60;this.world.step();
     this.objects.filter(o=>!o.broken).forEach(o=>{const p=o.body.translation(),q=o.body.rotation();o.mesh.position.set(p.x,p.y,p.z);o.mesh.quaternion.set(q.x,q.y,q.z,q.w);});
-    this.fragments.forEach(f=>{const p=f.body.translation(),q=f.body.rotation();f.mesh.position.set(p.x,p.y,p.z);f.mesh.quaternion.set(q.x,q.y,q.z,q.w);});
+    this.particles=this.particles.filter(p=>{const age=now-p.born;if(age>=p.life){this.scene.remove(p.mesh);p.mesh.geometry.dispose();(p.mesh.material as THREE.Material).dispose();return false;}const dt=1/60;p.mesh.position.addScaledVector(p.velocity,dt);p.velocity.y+=.018;const fade=1-age/p.life;(p.mesh.material as THREE.MeshStandardMaterial).opacity=fade;p.mesh.scale.setScalar(.7+age/p.life*1.8);return true;});
     this.projectiles.forEach(p=>{const pos=p.body.translation(),q=p.body.rotation(),vel=p.body.linvel();p.mesh.position.set(pos.x,pos.y,pos.z);p.mesh.quaternion.set(q.x,q.y,q.z,q.w);const speed=Math.hypot(vel.x,vel.y,vel.z);
       this.objects.forEach(o=>{if(o.broken||p.hits.has(o.config.id))return;const radius=Math.hypot(...o.config.size)/2;if(p.mesh.position.distanceTo(o.mesh.position)<radius+.32){p.hits.add(o.config.id);this.damageObject(o,speed,p.mesh.position);}});
     });

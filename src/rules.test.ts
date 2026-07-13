@@ -1,5 +1,6 @@
 import { describe,expect,it } from 'vitest';
 import { awardOnce,canDisguise,decimationPercent,launchVelocity,resolveRound,timedState } from './rules';
+import { livingRoom } from './level';
 
 describe('decimation rules',()=>{
   it('calculates weighted percentage',()=>expect(decimationPercent(750,1000)).toBe(75));
@@ -13,4 +14,8 @@ describe('decimation rules',()=>{
 describe('catapult trajectory',()=>{
   it('launches forward and upward',()=>{const v=launchVelocity(80,-160);expect(v.y).toBeGreaterThan(5);expect(v.z).toBeLessThan(0);});
   it('clamps extreme drags',()=>expect(launchVelocity(999,-999).power).toBe(24));
+});
+describe('living room tuning',()=>{
+  it('runs for one minute',()=>expect(livingRoom.duration).toBe(60));
+  it('contains several durable multi-hit targets',()=>expect(livingRoom.objects.filter(object=>object.breakThreshold>=18).length).toBeGreaterThanOrEqual(5));
 });

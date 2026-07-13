@@ -8,7 +8,7 @@ app.innerHTML=`
 <main id="game-shell">
   <div id="scene" aria-label="3D living room game"></div>
   <header class="hud hidden" id="hud">
-    <div class="stat"><span>TIME</span><strong id="timer">2:00</strong></div>
+    <div class="stat"><span>TIME</span><strong id="timer">1:00</strong></div>
     <div class="progress-wrap"><div class="progress-label"><span>DECIMATION</span><strong id="percent">0%</strong></div><div class="track"><i id="progress"></i><b style="left:75%"></b></div></div>
     <div class="stat"><span>SCORE</span><strong id="score">0</strong></div>
   </header>
@@ -19,7 +19,7 @@ app.innerHTML=`
   <section id="menu" class="panel hero">
     <div class="eyebrow">AN UNAUTHORIZED ALIEN ACTIVITY</div><h1>DECI<span>MATE</span></h1>
     <p>Wreck their room. Copy their stuff. Leave no witnesses—just questions.</p>
-    <div class="mission"><span>THE LIVING ROOM</span><strong>75% in 2:00</strong></div>
+    <div class="mission"><span>THE LIVING ROOM</span><strong>75% in 1:00</strong></div>
     <button id="start" class="primary">BEGIN DECIMATION <b>→</b></button>
     <button id="how" class="text-btn">How to play</button>
   </section>
@@ -49,7 +49,7 @@ function onResult(result:RoundResult){setPlayUi(false);showPanel('result');$('re
 const game=new DecimateGame($('scene'),{stats:(time,score,percent)=>{$('timer').textContent=`${Math.floor(time/60)}:${String(Math.ceil(time)%60).padStart(2,'0')}`;$('score').textContent=score.toLocaleString();$('percent').textContent=`${percent}%`;$<HTMLElement>('progress').style.width=`${percent}%`;returnAlert.classList.toggle('hidden',time>10);},state:onState,result:onResult,toast});
 game.init().catch(error=>{console.error(error);toast('Unable to initialize 3D physics.');});
 function begin(){showPanel();game.start();localStorage.setItem('decimate-tutorial','seen');}
-$('start').onclick=()=>localStorage.getItem('decimate-tutorial')?begin():showPanel('tutorial');$('how').onclick=()=>showPanel('tutorial');$('tutorial-go').onclick=begin;$('pause').onclick=()=>game.togglePause();$('resume').onclick=()=>game.togglePause();document.querySelectorAll('.restart').forEach(b=>b.addEventListener('click',()=>{showPanel();game.restart();}));
+$('start').onclick=()=>localStorage.getItem('decimate-tutorial')?begin():showPanel('tutorial');$('how').onclick=()=>showPanel('tutorial');$('tutorial-go').onclick=begin;$('pause').onclick=()=>game.togglePause();$('resume').onclick=()=>game.togglePause();document.querySelectorAll('.restart').forEach(b=>b.addEventListener('click',()=>{disguise.classList.remove('active');showPanel();game.restart();}));
 disguise.onclick=()=>{game.beginDisguise();disguise.classList.add('active');};$('mute').onclick=()=>{$('mute').textContent=game.audio.toggle()?'×':'♪';};
 let deferred:any;addEventListener('beforeinstallprompt',(event)=>{event.preventDefault();deferred=event;$('install').classList.remove('hidden');});$('install').onclick=async()=>{await deferred?.prompt();deferred=undefined;$('install').classList.add('hidden');};
 registerSW({onNeedRefresh(){toast('New build ready — reload to update.');}});
