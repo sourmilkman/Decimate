@@ -12,11 +12,12 @@ app.innerHTML=`
     <div class="stat"><span>TIME</span><strong id="timer">1:00</strong></div>
     <div class="progress-wrap"><div class="progress-label"><span>DECIMATION</span><strong id="percent">0%</strong></div><div class="track"><i id="progress"></i><b id="goal-marker" style="left:75%"></b></div></div>
     <div class="stat"><span>SCORE</span><strong id="score">0</strong></div>
+    <div class="room-hud"><span id="hud-room-number">ROOM 01</span><strong id="hud-room">The Living Room</strong></div>
   </header>
   <div class="top-actions hidden" id="actions"><button id="mute" class="icon" aria-label="Mute">♪</button><button id="pause" class="icon" aria-label="Pause">Ⅱ</button></div>
   <button id="disguise" class="disguise hidden"><span>◉</span> DISGUISE</button>
   <div id="toast" class="toast hidden"></div>
-  <div id="return-alert" class="return-alert hidden"><i></i><span>FOOTSTEPS APPROACHING</span></div>
+  <div id="return-alert" class="return-alert hidden"><i></i><strong id="return-count">10</strong><span>FOOTSTEPS APPROACHING</span><small>HIDE NOW</small></div>
   <section id="menu" class="panel hero">
     <div class="eyebrow">AN UNAUTHORIZED ALIEN ACTIVITY</div><h1>DECI<span>MATE</span></h1>
     <p id="room-tagline">Wreck their room. Copy their stuff. Leave no witnesses—just questions.</p>
@@ -42,7 +43,7 @@ if(selected>unlocked)selected=unlocked;
 
 function showPanel(id?:string){panels.forEach(p=>$(p).classList.toggle('hidden',p!==id));}
 function setPlayUi(show:boolean){hud.classList.toggle('hidden',!show);actions.classList.toggle('hidden',!show);disguise.classList.toggle('hidden',!show);}
-function updateMenu(){const level=levels[selected];$('room-name').textContent=level.name.toUpperCase();$('room-goal').textContent=`${level.targetPercent}% in 1:00 ›`;$('room-tagline').textContent=level.tagline;$<HTMLElement>('goal-marker').style.left=`${level.targetPercent}%`;localStorage.setItem('decimate-last-level',String(selected));}
+function updateMenu(){const level=levels[selected];$('room-name').textContent=level.name.toUpperCase();$('room-goal').textContent=`${level.targetPercent}% in 1:00 ›`;$('room-tagline').textContent=level.tagline;$('hud-room').textContent=level.name;$('hud-room-number').textContent=`ROOM ${String(selected+1).padStart(2,'0')}`;$<HTMLElement>('goal-marker').style.left=`${level.targetPercent}%`;localStorage.setItem('decimate-last-level',String(selected));}
 function chooseLevel(index:number){if(index>unlocked)return;selected=index;game.selectLevel(index);updateMenu();showPanel('menu');}
 function renderLevels(){const grid=$('level-grid');grid.innerHTML='';levels.forEach((level,index)=>{const locked=index>unlocked,button=document.createElement('button');button.className=`level-card${locked?' locked':''}${index===selected?' selected':''}`;button.disabled=locked;button.innerHTML=`<i>${locked?'LOCKED':String(index+1).padStart(2,'0')}</i><strong>${level.name}</strong><span>${locked?'Complete the previous room':`${level.targetPercent}% target · 1:00`}</span>`;button.onclick=()=>chooseLevel(index);grid.appendChild(button);});}
 let toastTimer=0;
@@ -55,7 +56,7 @@ function onResult(result:RoundResult){
   else $<HTMLButtonElement>('result-action').textContent=result.passed?'REPLAY ROOM':'TRY AGAIN';
   renderLevels();
 }
-const game=new DecimateGame($('scene'),{stats:(time,score,percent)=>{$('timer').textContent=`${Math.floor(time/60)}:${String(Math.ceil(time)%60).padStart(2,'0')}`;$('score').textContent=score.toLocaleString();$('percent').textContent=`${percent}%`;$<HTMLElement>('progress').style.width=`${percent}%`;returnAlert.classList.toggle('hidden',time>10);},state:onState,result:onResult,toast});
+const game=new DecimateGame($('scene'),{stats:(time,score,percent)=>{$('timer').textContent=`${Math.floor(time/60)}:${String(Math.ceil(time)%60).padStart(2,'0')}`;$('score').textContent=score.toLocaleString();$('percent').textContent=`${percent}%`;$<HTMLElement>('progress').style.width=`${percent}%`;returnAlert.classList.toggle('hidden',time>10);$('return-count').textContent=String(Math.max(0,Math.ceil(time)));returnAlert.style.setProperty('--approach',String(Math.max(0,Math.min(1,1-time/10))));},state:onState,result:onResult,toast});
 game.selectLevel(selected);game.init().catch(error=>{console.error(error);toast('Unable to initialize 3D physics.');});
 function begin(){game.selectLevel(selected);updateMenu();showPanel();game.start();localStorage.setItem('decimate-tutorial','seen');}
 function restart(){disguise.classList.remove('active');showPanel();game.restart();}

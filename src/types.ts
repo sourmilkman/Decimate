@@ -8,6 +8,7 @@ export interface DestructibleConfig {
   color: number;
   points: number;
   breakThreshold: number;
+  hitsRequired?: number;
   copyable?: boolean;
   shape?: 'box' | 'sphere';
 }

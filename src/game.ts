@@ -5,7 +5,7 @@ import { levels } from './level';
 import { awardOnce, canDisguise, decimationPercent, launchVelocity, resolveRound, timedState } from './rules';
 import type { DestructibleConfig, GameState, LevelConfig, RoundResult } from './types';
 
-interface RuntimeObject { config:DestructibleConfig; mesh:THREE.Mesh; body:RAPIER.RigidBody; damage:number; broken:boolean; }
+interface RuntimeObject { config:DestructibleConfig; mesh:THREE.Mesh; body:RAPIER.RigidBody; damage:number; hitsTaken:number; broken:boolean; }
 interface Projectile { mesh:THREE.Mesh; body:RAPIER.RigidBody; born:number; hits:Set<string>; }
 interface VaporParticle { mesh:THREE.Mesh; velocity:THREE.Vector3; born:number; life:number; }
 export interface GameEvents {
@@ -29,6 +29,7 @@ export class DecimateGame {
   private roomFloor!:THREE.Mesh;
   private backWall!:THREE.Mesh;
   private sideWall!:THREE.Mesh;
+  private textures = new Map<string,THREE.CanvasTexture>();
   private trajectory:THREE.Line;
   private raycaster = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
@@ -72,7 +73,7 @@ export class DecimateGame {
   get state() { return this.stateValue; }
   get currentLevel() { return this.activeLevel; }
   selectLevel(index:number) { this.activeLevel=levels[Math.max(0,Math.min(levels.length-1,index))];this.total=this.activeLevel.objects.reduce((sum,o)=>sum+o.points,0); }
-  start() { this.resetRound(); this.setState('playing'); }
+  start() { this.audio.arm();this.resetRound();this.setState('playing'); }
   restart() { this.start(); }
   togglePause() {
     if (this.stateValue === 'paused') this.setState(this.beforePause);
@@ -110,9 +111,29 @@ export class DecimateGame {
   private decorBox(pos:[number,number,number],size:[number,number,number],color:number,emissive=0) {
     const mesh=new THREE.Mesh(new THREE.BoxGeometry(...size),new THREE.MeshStandardMaterial({color,emissive,roughness:.75}));mesh.position.set(...pos);this.roomDecor.add(mesh);return mesh;
   }
+  private texture(kind:'wood'|'fabric'|'tile'|'concrete'|'metal'|'screen'|'wall',repeat=1) {
+    const key=`${kind}-${repeat}`;const cached=this.textures.get(key);if(cached)return cached;
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=128;const ctx=canvas.getContext('2d')!;ctx.fillStyle=kind==='screen'?'#59616b':'#d7d7d2';ctx.fillRect(0,0,128,128);
+    if(kind==='wood'){ctx.strokeStyle='#96968f';ctx.lineWidth=3;for(let y=8;y<128;y+=16){ctx.beginPath();for(let x=0;x<=128;x+=8)ctx.lineTo(x,y+Math.sin((x+y)*.09)*2);ctx.stroke();}}
+    if(kind==='fabric'){ctx.strokeStyle='#b4b4af';ctx.lineWidth=1;for(let n=0;n<128;n+=7){ctx.beginPath();ctx.moveTo(n,0);ctx.lineTo(n,128);ctx.stroke();ctx.beginPath();ctx.moveTo(0,n);ctx.lineTo(128,n);ctx.stroke();}}
+    if(kind==='tile'){ctx.strokeStyle='#a2a7a5';ctx.lineWidth=4;for(let n=0;n<=128;n+=32){ctx.beginPath();ctx.moveTo(n,0);ctx.lineTo(n,128);ctx.stroke();ctx.beginPath();ctx.moveTo(0,n);ctx.lineTo(128,n);ctx.stroke();}}
+    if(kind==='concrete'||kind==='wall'){ctx.fillStyle=kind==='wall'?'#c8c8c5':'#9b9d9b';for(let i=0;i<150;i++){const x=i*47%128,y=i*83%128,s=1+i%2;ctx.fillRect(x,y,s,s);}}
+    if(kind==='metal'){const gradient=ctx.createLinearGradient(0,0,128,0);gradient.addColorStop(0,'#989d9e');gradient.addColorStop(.5,'#f2f3ef');gradient.addColorStop(1,'#9da2a2');ctx.fillStyle=gradient;ctx.fillRect(0,0,128,128);ctx.strokeStyle='#b8bcba';for(let y=3;y<128;y+=6){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(128,y);ctx.stroke();}}
+    if(kind==='screen'){ctx.strokeStyle='#8ca2af';ctx.lineWidth=1;for(let n=0;n<128;n+=16){ctx.beginPath();ctx.moveTo(n,0);ctx.lineTo(n,128);ctx.stroke();ctx.beginPath();ctx.moveTo(0,n);ctx.lineTo(128,n);ctx.stroke();}}
+    const texture=new THREE.CanvasTexture(canvas);texture.name=kind;texture.wrapS=texture.wrapT=THREE.RepeatWrapping;texture.repeat.set(repeat,repeat);texture.colorSpace=THREE.SRGBColorSpace;texture.anisotropy=Math.min(4,this.renderer.capabilities.getMaxAnisotropy());this.textures.set(key,texture);return texture;
+  }
+  private objectTexture(config:DestructibleConfig) {
+    const text=`${config.id} ${config.name}`.toLowerCase();
+    if(/sofa|bed|chair|ottoman|laundry/.test(text))return this.texture('fabric',2);
+    if(/tv|monitor|mirror|whiteboard/.test(text))return this.texture('screen',2);
+    if(/fridge|oven|microwave|tool|bike|mower|speaker|printer|kettle|radio/.test(text))return this.texture('metal',2);
+    if(/desk|table|shelf|wardrobe|dresser|console|cabinet|island|nightstand|crate|workbench|bookcase/.test(text))return this.texture('wood',2);
+    return undefined;
+  }
   private applyRoomTheme() {
     this.roomDecor.traverse(child=>{if(child instanceof THREE.Mesh){child.geometry.dispose();(child.material as THREE.Material).dispose();}});this.roomDecor.clear();
-    const p=this.activeLevel.palette;(this.roomFloor.material as THREE.MeshStandardMaterial).color.setHex(p.floor);(this.backWall.material as THREE.MeshStandardMaterial).color.setHex(p.backWall);(this.sideWall.material as THREE.MeshStandardMaterial).color.setHex(p.sideWall);
+    const p=this.activeLevel.palette,floorMaterial=this.roomFloor.material as THREE.MeshStandardMaterial,backMaterial=this.backWall.material as THREE.MeshStandardMaterial,sideMaterial=this.sideWall.material as THREE.MeshStandardMaterial;
+    floorMaterial.color.setHex(p.floor);backMaterial.color.setHex(p.backWall);sideMaterial.color.setHex(p.sideWall);floorMaterial.map=this.texture(this.activeLevel.id==='kitchen'?'tile':this.activeLevel.id==='garage'?'concrete':this.activeLevel.id==='office'?'fabric':'wood',6);backMaterial.map=this.texture('wall',4);sideMaterial.map=this.texture('wall',4);floorMaterial.needsUpdate=backMaterial.needsUpdate=sideMaterial.needsUpdate=true;
     if(['living','bedroom','office'].includes(this.activeLevel.id)){
       this.decorBox([.5,.025,.2],[6,.04,4],p.rug);
       for(let i=0;i<5;i++)this.decorBox([.5,.052,-1.3+i*.7],[5.6,.015,.16],p.accent);
@@ -141,13 +162,24 @@ export class DecimateGame {
     this.objects.forEach(o=>{this.scene.remove(o.mesh);if(!o.broken)this.world.removeRigidBody(o.body)});this.objects=[];
     this.activeLevel.objects.forEach(config=>{
       const geometry=config.shape==='sphere'?new THREE.SphereGeometry(config.size[0]/2,16,12):new THREE.BoxGeometry(...config.size);
-      const material=new THREE.MeshStandardMaterial({color:config.color,roughness:.62,metalness:config.id==='tv'?.35:0});
+      const map=this.objectTexture(config),materialOptions:THREE.MeshStandardMaterialParameters={color:config.color,roughness:map&&/metal|screen/.test(map.name)?.35:.62,metalness:/tv|monitor|fridge|oven|tool/.test(config.id)?.35:0};if(map)materialOptions.map=map;const material=new THREE.MeshStandardMaterial(materialOptions);
       const mesh=new THREE.Mesh(geometry,material); mesh.position.set(...config.position); mesh.castShadow=true; mesh.receiveShadow=true; mesh.userData.objectId=config.id; this.scene.add(mesh);
       const body=this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(...config.position).setLinearDamping(.25).setAngularDamping(.35));
       const collider=config.shape==='sphere'?RAPIER.ColliderDesc.ball(config.size[0]/2):RAPIER.ColliderDesc.cuboid(config.size[0]/2,config.size[1]/2,config.size[2]/2);
       this.world.createCollider(collider.setDensity(Math.max(.3,config.points/120)).setFriction(.72).setRestitution(.18),body);
-      this.objects.push({config,mesh,body,damage:0,broken:false});
+      this.addModelDetails(mesh,config);this.objects.push({config,mesh,body,damage:0,hitsTaken:0,broken:false});
     });
+  }
+  private addModelDetails(mesh:THREE.Mesh,config:DestructibleConfig) {
+    if(config.id==='bed'){
+      const fabric=new THREE.MeshStandardMaterial({color:0xe4d9eb,map:this.texture('fabric',2),roughness:.85}),headboard=new THREE.Mesh(new THREE.BoxGeometry(config.size[0],1.5,.18),new THREE.MeshStandardMaterial({color:0x6b4f85,map:this.texture('wood',2),roughness:.72}));headboard.position.set(0,.75,-config.size[2]/2+.08);mesh.add(headboard);
+      [-1,1].forEach(x=>{const pillow=new THREE.Mesh(new THREE.BoxGeometry(1.15,.32,.62),fabric);pillow.position.set(x,.7,-.62);mesh.add(pillow);});
+    }
+    if(config.id==='car'){
+      const metal=new THREE.MeshStandardMaterial({color:config.color,map:this.texture('metal',2),metalness:.42,roughness:.34}),glass=new THREE.MeshStandardMaterial({color:0x72b8d5,map:this.texture('screen',2),metalness:.25,roughness:.2}),rubber=new THREE.MeshStandardMaterial({color:0x17191a,roughness:.95});
+      const cabin=new THREE.Mesh(new THREE.BoxGeometry(2.5,.8,1.72),metal);cabin.position.set(-.25,.82,0);mesh.add(cabin);const windshield=new THREE.Mesh(new THREE.BoxGeometry(.08,.56,1.42),glass);windshield.position.set(1.02,.88,0);mesh.add(windshield);
+      for(const x of [-1.4,1.4])for(const z of [-.95,.95]){const wheel=new THREE.Mesh(new THREE.CylinderGeometry(.42,.42,.28,16),rubber);wheel.rotation.x=Math.PI/2;wheel.position.set(x,-.48,z);mesh.add(wheel);}
+    }
   }
   private resetRound() {
     this.projectiles.forEach(x=>{this.scene.remove(x.mesh);this.world.removeRigidBody(x.body)});this.projectiles=[];
@@ -184,12 +216,13 @@ export class DecimateGame {
     const hit=this.raycaster.intersectObjects(this.objects.filter(o=>canDisguise(o.config.copyable,o.broken)).map(o=>o.mesh))[0];
     if(!hit){this.events.toast('Tap one of the glowing intact objects');return;}
     const chosen=this.objects.find(o=>o.config.id===hit.object.userData.objectId)!;this.disguised=true;this.disguiseMode=false;this.clearHighlights();this.catapult.visible=false;
-    const source=chosen.mesh; const clone=new THREE.Mesh(source.geometry.clone(),(source.material as THREE.Material).clone());clone.scale.set(.7,.7,.7);clone.position.set(0,.4,4.35);this.alien.clear();this.alien.add(clone);this.alien.visible=true;this.audio.morph();this.setState('disguised');this.events.toast(`Disguised as ${chosen.config.name}. Stay still…`);
+    const source=chosen.mesh,scale=Math.min(.7,1.4/Math.max(...chosen.config.size)),clone=new THREE.Mesh(source.geometry.clone(),(source.material as THREE.Material).clone());clone.scale.setScalar(scale);clone.position.set(0,chosen.config.size[1]*scale/2,0);this.alien.clear();this.alien.add(clone);this.alien.visible=true;this.audio.morph();this.setState('disguised');this.events.toast(`Disguised as ${chosen.config.name}. Stay still…`);
   }
   private clearHighlights(){this.objects.forEach(o=>(o.mesh.material as THREE.MeshStandardMaterial).emissive.set(0x000000));}
   private damageObject(object:RuntimeObject, speed:number, point:THREE.Vector3) {
-    if(object.broken)return;object.damage+=Math.max(5,speed*.72);object.body.applyImpulse({x:(Math.random()-.5)*3,y:2,z:-2},true);
-    if(object.damage<object.config.breakThreshold){this.audio.impact();const material=object.mesh.material as THREE.MeshStandardMaterial;material.emissive.set(0x6e8124);setTimeout(()=>{if(!object.broken)material.emissive.set(0x000000)},100);return;}
+    if(object.broken)return;object.hitsTaken++;object.damage+=Math.max(5,speed*.72);object.body.applyImpulse({x:(Math.random()-.5)*3,y:2,z:-2},true);
+    const needsMore=object.config.hitsRequired?object.hitsTaken<object.config.hitsRequired:object.damage<object.config.breakThreshold;
+    if(needsMore){this.audio.impact();const material=object.mesh.material as THREE.MeshStandardMaterial;material.emissive.set(0x6e8124);setTimeout(()=>{if(!object.broken)material.emissive.set(0x000000)},100);if(object.config.hitsRequired)this.events.toast(`${object.config.name}: ${object.hitsTaken}/${object.config.hitsRequired} hits`);return;}
     object.broken=true;const points=awardOnce(this.awardedIds,object.config.id,object.config.points);this.score+=points;this.awarded+=points;this.audio.impact();this.shake=.22;
     object.mesh.visible=false;this.world.removeRigidBody(object.body);this.spawnVapor(object,point);this.audio.vaporize();
     const percent=decimationPercent(this.awarded,this.total);this.events.stats(this.remaining,this.score,percent);this.events.toast(`+${object.config.points} · ${object.config.name}`);
@@ -217,7 +250,7 @@ export class DecimateGame {
     if(['playing','return-warning','disguised'].includes(this.stateValue)){
       this.remaining=Math.max(0,this.remaining-dt);const second=Math.ceil(this.remaining);
       const timed=timedState(this.remaining,this.stateValue,this.activeLevel.returnWarning);if(timed!==this.stateValue)this.setState(timed);
-      if(this.remaining<=this.activeLevel.returnWarning&&second!==this.lastWarningSecond){this.lastWarningSecond=second;this.audio.warning();}
+      if(this.remaining<=this.activeLevel.returnWarning&&second!==this.lastWarningSecond){this.lastWarningSecond=second;this.audio.footstep(1-this.remaining/this.activeLevel.returnWarning);}
       this.events.stats(this.remaining,this.score,decimationPercent(this.awarded,this.total));
       if(this.remaining<=0){const result=resolveRound(decimationPercent(this.awarded,this.total),this.disguised,this.score,this.activeLevel.targetPercent);this.setState(result.passed?'passed':'failed');result.passed?this.audio.success():this.audio.fail();this.events.result(result);}
     }

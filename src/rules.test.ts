@@ -23,4 +23,6 @@ describe('level progression',()=>{
   it('contains five distinct one-minute rooms',()=>{expect(levels).toHaveLength(5);expect(new Set(levels.map(level=>level.id)).size).toBe(5);expect(levels.every(level=>level.duration===60)).toBe(true);});
   it('raises the target as rooms unlock',()=>expect(levels.map(level=>level.targetPercent)).toEqual([75,77,79,81,83]));
   it('always provides a valid disguise target',()=>expect(levels.every(level=>level.objects.some(object=>object.copyable))).toBe(true));
+  it('gives the garage car an exact fifteen-hit requirement',()=>expect(levels.find(level=>level.id==='garage')?.objects.find(object=>object.id==='car')?.hitsRequired).toBe(15));
+  it('keeps a king bed in the bedroom',()=>expect(levels.find(level=>level.id==='bedroom')?.objects.some(object=>object.id==='bed')).toBe(true));
 });
