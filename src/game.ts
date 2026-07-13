@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { AudioSystem } from './audio';
-import { livingRoom } from './level';
+import { levels } from './level';
 import { awardOnce, canDisguise, decimationPercent, launchVelocity, resolveRound, timedState } from './rules';
-import type { DestructibleConfig, GameState, RoundResult } from './types';
+import type { DestructibleConfig, GameState, LevelConfig, RoundResult } from './types';
 
 interface RuntimeObject { config:DestructibleConfig; mesh:THREE.Mesh; body:RAPIER.RigidBody; damage:number; broken:boolean; }
 interface Projectile { mesh:THREE.Mesh; body:RAPIER.RigidBody; born:number; hits:Set<string>; }
@@ -25,17 +25,22 @@ export class DecimateGame {
   private particles:VaporParticle[] = [];
   private catapult = new THREE.Group();
   private alien = new THREE.Group();
+  private roomDecor = new THREE.Group();
+  private roomFloor!:THREE.Mesh;
+  private backWall!:THREE.Mesh;
+  private sideWall!:THREE.Mesh;
   private trajectory:THREE.Line;
   private raycaster = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
   private dragStart?:{x:number;y:number};
   private dragCurrent?:{x:number;y:number};
   private lastFrame = performance.now();
-  private remaining = livingRoom.duration;
+  private activeLevel:LevelConfig = levels[0];
+  private remaining = this.activeLevel.duration;
   private score = 0;
   private awarded = 0;
   private awardedIds = new Set<string>();
-  private total = livingRoom.objects.reduce((sum,o)=>sum+o.points,0);
+  private total = this.activeLevel.objects.reduce((sum,o)=>sum+o.points,0);
   private stateValue:GameState = 'menu';
   private beforePause:GameState = 'playing';
   private disguiseMode = false;
@@ -65,6 +70,8 @@ export class DecimateGame {
   }
 
   get state() { return this.stateValue; }
+  get currentLevel() { return this.activeLevel; }
+  selectLevel(index:number) { this.activeLevel=levels[Math.max(0,Math.min(levels.length-1,index))];this.total=this.activeLevel.objects.reduce((sum,o)=>sum+o.points,0); }
   start() { this.resetRound(); this.setState('playing'); }
   restart() { this.start(); }
   togglePause() {
@@ -92,14 +99,29 @@ export class DecimateGame {
     mesh.position.set(...pos); mesh.receiveShadow=true; this.scene.add(mesh);
     const body=this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(...pos));
     this.world.createCollider(RAPIER.ColliderDesc.cuboid(size[0]/2,size[1]/2,size[2]/2).setFriction(.8),body);
+    return mesh;
   }
   private buildRoom() {
-    this.addStaticBox([0,-.25,0],[12,.5,12],0x24212c);
-    this.addStaticBox([0,3,-5.75],[12,6,.3],0x393244);
-    this.addStaticBox([-5.85,3,0],[.3,6,12],0x302b3c);
-    const rug=new THREE.Mesh(new THREE.BoxGeometry(6,.04,4),new THREE.MeshStandardMaterial({color:0x5f3e72,roughness:1})); rug.position.set(.5,.025,.2); this.scene.add(rug);
-    for(let i=0;i<5;i++){ const strip=new THREE.Mesh(new THREE.BoxGeometry(5.6,.015,.22),new THREE.MeshBasicMaterial({color:0x805991})); strip.position.set(.5,.052,-1.3+i*.7); this.scene.add(strip); }
-    const windowFrame=new THREE.Mesh(new THREE.BoxGeometry(2.8,2.2,.12),new THREE.MeshStandardMaterial({color:0x90c9e8,emissive:0x183b55})); windowFrame.position.set(3.4,3.3,-5.5); this.scene.add(windowFrame);
+    this.roomFloor=this.addStaticBox([0,-.25,0],[12,.5,12],0x24212c);
+    this.backWall=this.addStaticBox([0,3,-5.75],[12,6,.3],0x393244);
+    this.sideWall=this.addStaticBox([-5.85,3,0],[.3,6,12],0x302b3c);
+    this.scene.add(this.roomDecor);this.applyRoomTheme();
+  }
+  private decorBox(pos:[number,number,number],size:[number,number,number],color:number,emissive=0) {
+    const mesh=new THREE.Mesh(new THREE.BoxGeometry(...size),new THREE.MeshStandardMaterial({color,emissive,roughness:.75}));mesh.position.set(...pos);this.roomDecor.add(mesh);return mesh;
+  }
+  private applyRoomTheme() {
+    this.roomDecor.traverse(child=>{if(child instanceof THREE.Mesh){child.geometry.dispose();(child.material as THREE.Material).dispose();}});this.roomDecor.clear();
+    const p=this.activeLevel.palette;(this.roomFloor.material as THREE.MeshStandardMaterial).color.setHex(p.floor);(this.backWall.material as THREE.MeshStandardMaterial).color.setHex(p.backWall);(this.sideWall.material as THREE.MeshStandardMaterial).color.setHex(p.sideWall);
+    if(['living','bedroom','office'].includes(this.activeLevel.id)){
+      this.decorBox([.5,.025,.2],[6,.04,4],p.rug);
+      for(let i=0;i<5;i++)this.decorBox([.5,.052,-1.3+i*.7],[5.6,.015,.16],p.accent);
+    }
+    if(this.activeLevel.id==='living')this.decorBox([3.4,3.3,-5.5],[2.8,2.2,.12],p.accent,0x183b55);
+    if(this.activeLevel.id==='kitchen')for(let x=-4.5;x<=4.5;x+=1.15)this.decorBox([x,2.9,-5.5],[1.02,.7,.08],x%2?p.accent:0xd7ebe7);
+    if(this.activeLevel.id==='bedroom'){this.decorBox([2.8,3.25,-5.5],[3.3,1.45,.1],p.accent,0x421830);this.decorBox([-1.4,3.5,-5.5],[1.3,1.3,.1],0xf1c66b);}
+    if(this.activeLevel.id==='office')for(let i=0;i<3;i++)this.decorBox([-1.8+i*1.8,3.6,-5.5],[1.35,1.55,.08],p.accent,0x12384c);
+    if(this.activeLevel.id==='garage'){this.decorBox([1.1,3,-5.5],[7.5,5,.08],0x69706e);for(let y=1;y<5.5;y+=.75)this.decorBox([1.1,y,-5.42],[7.4,.06,.06],p.accent);}
   }
   private buildCatapult() {
     const wood=new THREE.MeshStandardMaterial({color:0x75452e,roughness:.7});
@@ -117,7 +139,7 @@ export class DecimateGame {
   }
   private resetObjects() {
     this.objects.forEach(o=>{this.scene.remove(o.mesh);if(!o.broken)this.world.removeRigidBody(o.body)});this.objects=[];
-    livingRoom.objects.forEach(config=>{
+    this.activeLevel.objects.forEach(config=>{
       const geometry=config.shape==='sphere'?new THREE.SphereGeometry(config.size[0]/2,16,12):new THREE.BoxGeometry(...config.size);
       const material=new THREE.MeshStandardMaterial({color:config.color,roughness:.62,metalness:config.id==='tv'?.35:0});
       const mesh=new THREE.Mesh(geometry,material); mesh.position.set(...config.position); mesh.castShadow=true; mesh.receiveShadow=true; mesh.userData.objectId=config.id; this.scene.add(mesh);
@@ -130,7 +152,7 @@ export class DecimateGame {
   private resetRound() {
     this.projectiles.forEach(x=>{this.scene.remove(x.mesh);this.world.removeRigidBody(x.body)});this.projectiles=[];
     this.particles.forEach(x=>{this.scene.remove(x.mesh);x.mesh.geometry.dispose();(x.mesh.material as THREE.Material).dispose()});this.particles=[];
-    this.resetObjects();this.resetAlienAppearance();this.remaining=livingRoom.duration;this.score=0;this.awarded=0;this.awardedIds.clear();this.disguised=false;this.disguiseMode=false;this.catapult.visible=true;this.alien.visible=true;this.lastWarningSecond=-1;
+    this.applyRoomTheme();this.resetObjects();this.resetAlienAppearance();this.remaining=this.activeLevel.duration;this.score=0;this.awarded=0;this.awardedIds.clear();this.disguised=false;this.disguiseMode=false;this.catapult.visible=true;this.alien.visible=true;this.lastWarningSecond=-1;
     this.events.stats(this.remaining,0,0); this.events.toast('Drag back, aim, release.');
   }
   private bindInput() {
@@ -194,10 +216,10 @@ export class DecimateGame {
     if(this.stateValue!=='paused')this.updatePhysics(now);
     if(['playing','return-warning','disguised'].includes(this.stateValue)){
       this.remaining=Math.max(0,this.remaining-dt);const second=Math.ceil(this.remaining);
-      const timed=timedState(this.remaining,this.stateValue,livingRoom.returnWarning);if(timed!==this.stateValue)this.setState(timed);
-      if(this.remaining<=livingRoom.returnWarning&&second!==this.lastWarningSecond){this.lastWarningSecond=second;this.audio.warning();}
+      const timed=timedState(this.remaining,this.stateValue,this.activeLevel.returnWarning);if(timed!==this.stateValue)this.setState(timed);
+      if(this.remaining<=this.activeLevel.returnWarning&&second!==this.lastWarningSecond){this.lastWarningSecond=second;this.audio.warning();}
       this.events.stats(this.remaining,this.score,decimationPercent(this.awarded,this.total));
-      if(this.remaining<=0){const result=resolveRound(decimationPercent(this.awarded,this.total),this.disguised,this.score,livingRoom.targetPercent);this.setState(result.passed?'passed':'failed');result.passed?this.audio.success():this.audio.fail();this.events.result(result);}
+      if(this.remaining<=0){const result=resolveRound(decimationPercent(this.awarded,this.total),this.disguised,this.score,this.activeLevel.targetPercent);this.setState(result.passed?'passed':'failed');result.passed?this.audio.success():this.audio.fail();this.events.result(result);}
     }
     if(this.shake>0){this.shake=Math.max(0,this.shake-dt);this.camera.position.x=11+(Math.random()-.5)*this.shake;this.camera.position.y=9.2+(Math.random()-.5)*this.shake;}else{this.camera.position.x=11;this.camera.position.y=9.2;}
     this.camera.lookAt(0,1,-.7);this.renderer.render(this.scene,this.camera);requestAnimationFrame(t=>this.loop(t));

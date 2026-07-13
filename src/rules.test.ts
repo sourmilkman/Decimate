@@ -1,6 +1,6 @@
 import { describe,expect,it } from 'vitest';
 import { awardOnce,canDisguise,decimationPercent,launchVelocity,resolveRound,timedState } from './rules';
-import { livingRoom } from './level';
+import { levels, livingRoom } from './level';
 
 describe('decimation rules',()=>{
   it('calculates weighted percentage',()=>expect(decimationPercent(750,1000)).toBe(75));
@@ -18,4 +18,9 @@ describe('catapult trajectory',()=>{
 describe('living room tuning',()=>{
   it('runs for one minute',()=>expect(livingRoom.duration).toBe(60));
   it('contains several durable multi-hit targets',()=>expect(livingRoom.objects.filter(object=>object.breakThreshold>=18).length).toBeGreaterThanOrEqual(5));
+});
+describe('level progression',()=>{
+  it('contains five distinct one-minute rooms',()=>{expect(levels).toHaveLength(5);expect(new Set(levels.map(level=>level.id)).size).toBe(5);expect(levels.every(level=>level.duration===60)).toBe(true);});
+  it('raises the target as rooms unlock',()=>expect(levels.map(level=>level.targetPercent)).toEqual([75,77,79,81,83]));
+  it('always provides a valid disguise target',()=>expect(levels.every(level=>level.objects.some(object=>object.copyable))).toBe(true));
 });

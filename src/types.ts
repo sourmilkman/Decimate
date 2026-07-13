@@ -13,10 +13,13 @@ export interface DestructibleConfig {
 }
 
 export interface LevelConfig {
+  id: string;
   name: string;
+  tagline: string;
   duration: number;
   returnWarning: number;
   targetPercent: number;
+  palette: { floor:number; backWall:number; sideWall:number; rug:number; accent:number };
   objects: DestructibleConfig[];
 }
 
