@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { AudioSystem } from './audio';
 import { livingRoom } from './level';
-import { decimationPercent, launchVelocity, resolveRound } from './rules';
+import { awardOnce, canDisguise, decimationPercent, launchVelocity, resolveRound, timedState } from './rules';
 import type { DestructibleConfig, GameState, RoundResult } from './types';
 
 interface RuntimeObject { config:DestructibleConfig; mesh:THREE.Mesh; body:RAPIER.RigidBody; damage:number; broken:boolean; }
@@ -34,6 +34,7 @@ export class DecimateGame {
   private remaining = livingRoom.duration;
   private score = 0;
   private awarded = 0;
+  private awardedIds = new Set<string>();
   private total = livingRoom.objects.reduce((sum,o)=>sum+o.points,0);
   private stateValue:GameState = 'menu';
   private beforePause:GameState = 'playing';
@@ -73,7 +74,7 @@ export class DecimateGame {
   beginDisguise() {
     if (!['playing','return-warning'].includes(this.stateValue)) return;
     this.disguiseMode = true;
-    this.objects.filter(o=>o.config.copyable&&!o.broken).forEach(o=>(o.mesh.material as THREE.MeshStandardMaterial).emissive.set(0x426611));
+    this.objects.filter(o=>canDisguise(o.config.copyable,o.broken)).forEach(o=>(o.mesh.material as THREE.MeshStandardMaterial).emissive.set(0x426611));
     this.events.toast('Tap a glowing object to copy it');
   }
   cancelDisguise() { this.disguiseMode=false; this.clearHighlights(); }
@@ -125,7 +126,7 @@ export class DecimateGame {
   }
   private resetRound() {
     [...this.projectiles,...this.fragments].forEach(x=>{this.scene.remove(x.mesh);this.world.removeRigidBody(x.body)}); this.projectiles=[];this.fragments=[];
-    this.resetObjects(); this.remaining=livingRoom.duration;this.score=0;this.awarded=0;this.disguised=false;this.disguiseMode=false;this.catapult.visible=true;this.alien.visible=true;this.lastWarningSecond=-1;
+    this.resetObjects(); this.remaining=livingRoom.duration;this.score=0;this.awarded=0;this.awardedIds.clear();this.disguised=false;this.disguiseMode=false;this.catapult.visible=true;this.alien.visible=true;this.lastWarningSecond=-1;
     this.events.stats(this.remaining,0,0); this.events.toast('Drag back, aim, release.');
   }
   private bindInput() {
@@ -154,7 +155,7 @@ export class DecimateGame {
   }
   private pickDisguise(x:number,y:number) {
     const rect=this.renderer.domElement.getBoundingClientRect();this.pointer.set((x-rect.left)/rect.width*2-1,-((y-rect.top)/rect.height)*2+1);this.raycaster.setFromCamera(this.pointer,this.camera);
-    const hit=this.raycaster.intersectObjects(this.objects.filter(o=>o.config.copyable&&!o.broken).map(o=>o.mesh))[0];
+    const hit=this.raycaster.intersectObjects(this.objects.filter(o=>canDisguise(o.config.copyable,o.broken)).map(o=>o.mesh))[0];
     if(!hit){this.events.toast('Tap one of the glowing intact objects');return;}
     const chosen=this.objects.find(o=>o.config.id===hit.object.userData.objectId)!;this.disguised=true;this.disguiseMode=false;this.clearHighlights();this.catapult.visible=false;
     const source=chosen.mesh; const clone=new THREE.Mesh(source.geometry.clone(),(source.material as THREE.Material).clone());clone.scale.set(.7,.7,.7);clone.position.set(0,.4,4.35);this.alien.clear();this.alien.add(clone);this.alien.visible=true;this.audio.morph();this.setState('disguised');this.events.toast(`Disguised as ${chosen.config.name}. Stay still…`);
@@ -163,7 +164,7 @@ export class DecimateGame {
   private damageObject(object:RuntimeObject, speed:number, point:THREE.Vector3) {
     if(object.broken)return;object.damage+=Math.max(5,speed*.72);object.body.applyImpulse({x:(Math.random()-.5)*3,y:2,z:-2},true);
     if(object.damage<object.config.breakThreshold){this.audio.impact();return;}
-    object.broken=true;this.score+=object.config.points;this.awarded+=object.config.points;this.audio.impact();this.shake=.22;
+    object.broken=true;const points=awardOnce(this.awardedIds,object.config.id,object.config.points);this.score+=points;this.awarded+=points;this.audio.impact();this.shake=.22;
     object.mesh.visible=false;this.world.removeRigidBody(object.body);this.spawnFragments(object,point);
     const percent=decimationPercent(this.awarded,this.total);this.events.stats(this.remaining,this.score,percent);this.events.toast(`+${object.config.points} · ${object.config.name}`);
   }
@@ -190,7 +191,7 @@ export class DecimateGame {
     if(this.stateValue!=='paused')this.updatePhysics(now);
     if(['playing','return-warning','disguised'].includes(this.stateValue)){
       this.remaining=Math.max(0,this.remaining-dt);const second=Math.ceil(this.remaining);
-      if(this.remaining<=livingRoom.returnWarning&&this.stateValue==='playing')this.setState('return-warning');
+      const timed=timedState(this.remaining,this.stateValue,livingRoom.returnWarning);if(timed!==this.stateValue)this.setState(timed);
       if(this.remaining<=livingRoom.returnWarning&&second!==this.lastWarningSecond){this.lastWarningSecond=second;this.audio.warning();}
       this.events.stats(this.remaining,this.score,decimationPercent(this.awarded,this.total));
       if(this.remaining<=0){const result=resolveRound(decimationPercent(this.awarded,this.total),this.disguised,this.score,livingRoom.targetPercent);this.setState(result.passed?'passed':'failed');result.passed?this.audio.success():this.audio.fail();this.events.result(result);}
