@@ -1,3 +1,9 @@
+export function humanReaction(caught:boolean,percent:number) {
+  if(caught)return 'What is that thing? Hey! You! Get out of my house!';
+  if(percent>=75)return 'What happened to everything? Where did all my stuff go?';
+  return 'What happened in here? This room is a disaster!';
+}
+
 export class AudioSystem {
   private context?: AudioContext;
   muted = false;
@@ -29,6 +35,17 @@ export class AudioSystem {
     if(this.muted)return;this.arm();
     const volume=.025+Math.max(0,Math.min(1,proximity))*.11,frequency=92-proximity*34,delay=170-proximity*75;
     this.tone(frequency,.11,volume,'sine');setTimeout(()=>this.tone(frequency*.88,.12,volume*.92,'triangle'),delay);
+  }
+  resetHuman() { if(typeof speechSynthesis!=='undefined')speechSynthesis.cancel(); }
+  private doorOpen() {
+    if(this.muted)return;this.arm();const context=this.context!,now=context.currentTime,oscillator=context.createOscillator(),gain=context.createGain(),filter=context.createBiquadFilter();
+    oscillator.type='sawtooth';oscillator.frequency.setValueAtTime(145,now);oscillator.frequency.exponentialRampToValueAtTime(48,now+.72);filter.type='lowpass';filter.frequency.value=540;gain.gain.setValueAtTime(.001,now);gain.gain.exponentialRampToValueAtTime(.075,now+.08);gain.gain.exponentialRampToValueAtTime(.001,now+.78);oscillator.connect(filter).connect(gain).connect(context.destination);oscillator.start(now);oscillator.stop(now+.8);
+    setTimeout(()=>{this.tone(78,.16,.11,'square');this.tone(310,.06,.045,'triangle');},620);
+  }
+  humanReturn(caught:boolean,percent:number) {
+    if(this.muted)return;this.doorOpen();setTimeout(()=>{this.tone(caught?260:205,.22,.065,'triangle');this.tone(caught?390:305,.18,.045,'sine');},820);
+    if(typeof speechSynthesis==='undefined')return;const line=humanReaction(caught,percent);
+    setTimeout(()=>{if(this.muted)return;const utterance=new SpeechSynthesisUtterance(line),voices=speechSynthesis.getVoices(),voice=voices.find(item=>/^en-GB/i.test(item.lang))??voices.find(item=>/^en/i.test(item.lang));if(voice)utterance.voice=voice;utterance.rate=caught?1.08:.94;utterance.pitch=caught?1.12:.88;utterance.volume=.95;speechSynthesis.cancel();speechSynthesis.speak(utterance);},1050);
   }
   morph() { this.tone(280,.3,.06,'sawtooth'); setTimeout(()=>this.tone(620,.18,.04),90); }
   success() { [420,560,720].forEach((n,i)=>setTimeout(()=>this.tone(n,.2,.05),i*100)); }

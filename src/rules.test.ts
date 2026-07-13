@@ -1,6 +1,7 @@
 import { describe,expect,it } from 'vitest';
 import { awardOnce,canDisguise,decimationPercent,launchVelocity,resolveRound,timedState } from './rules';
 import { levels, livingRoom } from './level';
+import { humanReaction } from './audio';
 
 describe('decimation rules',()=>{
   it('calculates weighted percentage',()=>expect(decimationPercent(750,1000)).toBe(75));
@@ -25,4 +26,9 @@ describe('level progression',()=>{
   it('always provides a valid disguise target',()=>expect(levels.every(level=>level.objects.some(object=>object.copyable))).toBe(true));
   it('gives the garage car an exact fifteen-hit requirement',()=>expect(levels.find(level=>level.id==='garage')?.objects.find(object=>object.id==='car')?.hitsRequired).toBe(15));
   it('keeps a king bed in the bedroom',()=>expect(levels.find(level=>level.id==='bedroom')?.objects.some(object=>object.id==='bed')).toBe(true));
+});
+describe('human return reactions',()=>{
+  it('reacts to vanished possessions when the alien is hidden',()=>expect(humanReaction(false,80)).toContain('stuff'));
+  it('reacts differently when the alien is caught',()=>expect(humanReaction(true,80)).toContain('thing'));
+  it('comments on partial destruction',()=>expect(humanReaction(false,50)).toContain('disaster'));
 });

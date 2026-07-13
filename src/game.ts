@@ -73,7 +73,7 @@ export class DecimateGame {
   get state() { return this.stateValue; }
   get currentLevel() { return this.activeLevel; }
   selectLevel(index:number) { this.activeLevel=levels[Math.max(0,Math.min(levels.length-1,index))];this.total=this.activeLevel.objects.reduce((sum,o)=>sum+o.points,0); }
-  start() { this.audio.arm();this.resetRound();this.setState('playing'); }
+  start() { this.audio.resetHuman();this.audio.arm();this.resetRound();this.setState('playing'); }
   restart() { this.start(); }
   togglePause() {
     if (this.stateValue === 'paused') this.setState(this.beforePause);
@@ -252,7 +252,7 @@ export class DecimateGame {
       const timed=timedState(this.remaining,this.stateValue,this.activeLevel.returnWarning);if(timed!==this.stateValue)this.setState(timed);
       if(this.remaining<=this.activeLevel.returnWarning&&second!==this.lastWarningSecond){this.lastWarningSecond=second;this.audio.footstep(1-this.remaining/this.activeLevel.returnWarning);}
       this.events.stats(this.remaining,this.score,decimationPercent(this.awarded,this.total));
-      if(this.remaining<=0){const result=resolveRound(decimationPercent(this.awarded,this.total),this.disguised,this.score,this.activeLevel.targetPercent);this.setState(result.passed?'passed':'failed');result.passed?this.audio.success():this.audio.fail();this.events.result(result);}
+      if(this.remaining<=0){const percent=decimationPercent(this.awarded,this.total),result=resolveRound(percent,this.disguised,this.score,this.activeLevel.targetPercent);this.audio.humanReturn(!this.disguised,percent);this.setState(result.passed?'passed':'failed');this.events.result(result);}
     }
     if(this.shake>0){this.shake=Math.max(0,this.shake-dt);this.camera.position.x=11+(Math.random()-.5)*this.shake;this.camera.position.y=9.2+(Math.random()-.5)*this.shake;}else{this.camera.position.x=11;this.camera.position.y=9.2;}
     this.camera.lookAt(0,1,-.7);this.renderer.render(this.scene,this.camera);requestAnimationFrame(t=>this.loop(t));
